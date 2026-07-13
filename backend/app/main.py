@@ -199,6 +199,10 @@ app.include_router(city_access_fixed.router, prefix="/api/v1", tags=["city-acces
 # Infrastructure
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
 
+# Locally stored user uploads (e.g. profile avatars)
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health_check():

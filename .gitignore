@@ -1,0 +1,6 @@
+# Runtime user uploads (avatars etc.) stored by the backend
+backend/uploads/
+
+# Python bytecode
+__pycache__/
+*.py[cod]

@@ -15,6 +15,8 @@ from ...models.profile import (
     ProfileResponse
 )
 from ...database import supabase
+from ...services import profile_store
+from ...config import settings
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,6 +27,10 @@ router = APIRouter(prefix="/profile", tags=["profile"])
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'gif'}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 AVATAR_SIZE = (300, 300)  # Max avatar dimensions
+
+# Avatars are stored on local disk and served by the backend at /uploads
+AVATAR_DIR = os.path.join("uploads", "avatars")
+os.makedirs(AVATAR_DIR, exist_ok=True)
 
 def allowed_file(filename: str) -> bool:
     """Check if the file extension is allowed"""
@@ -57,6 +63,18 @@ def resize_image(image_data: bytes, size: tuple = AVATAR_SIZE) -> bytes:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid image file"
         )
+
+def _delete_avatar_files(user_id: str) -> None:
+    """Remove any stored avatar files for this user."""
+    try:
+        for name in os.listdir(AVATAR_DIR):
+            if name.startswith(f"{user_id}_avatar_"):
+                os.remove(os.path.join(AVATAR_DIR, name))
+                logger.info(f"Deleted existing avatar file: {name}")
+    except FileNotFoundError:
+        pass
+    except Exception as delete_error:
+        logger.warning(f"Could not delete existing avatar files: {delete_error}")
 
 @router.get("", response_model=ProfileResponse)
 async def get_profile(
@@ -339,57 +357,34 @@ async def upload_avatar(
         
         # Resize image
         resized_image = resize_image(file_content)
-        
-        # Generate unique filename
-        file_extension = file.filename.rsplit('.', 1)[1].lower()
-        unique_filename = f"{user.id}/avatar_{uuid.uuid4().hex}.jpg"  # Always save as JPEG after processing
-        
-        try:
-            # Delete existing avatar if exists
-            existing_files = supabase.storage.from_('profile-pictures').list(user.id)
-            if existing_files:
-                for existing_file in existing_files:
-                    if existing_file['name'].startswith('avatar_'):
-                        supabase.storage.from_('profile-pictures').remove([f"{user.id}/{existing_file['name']}"])
-                        logger.info(f"Deleted existing avatar: {existing_file['name']}")
-        except Exception as delete_error:
-            logger.warning(f"Could not delete existing avatar: {delete_error}")
-        
-        # Upload new avatar
-        upload_response = supabase.storage.from_('profile-pictures').upload(
-            unique_filename,
-            resized_image,
-            file_options={'content-type': 'image/jpeg'}
-        )
-        
-        if upload_response.status_code != 200:
-            logger.error(f"Upload failed: {upload_response}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to upload avatar"
-            )
-        
-        # Get public URL
-        public_url = supabase.storage.from_('profile-pictures').get_public_url(unique_filename)
-        
+
+        # Remove previous avatar files, then store the new one on disk.
+        # Always saved as JPEG after processing; uuid suffix busts browser cache.
+        _delete_avatar_files(user.id)
+        unique_filename = f"{user.id}_avatar_{uuid.uuid4().hex}.jpg"
+        file_path = os.path.join(AVATAR_DIR, unique_filename)
+        with open(file_path, 'wb') as f:
+            f.write(resized_image)
+
+        public_url = f"{settings.backend_url}/uploads/avatars/{unique_filename}"
+
         # Update user profile with new avatar URL
-        profile_update = supabase.table('user_profiles').update({
-            'avatar_url': public_url
-        }).eq('user_id', user.id).execute()
-        
-        if not profile_update.data:
-            # Clean up uploaded file if profile update fails
+        try:
+            await profile_store.set_avatar_url(user.id, user.email, public_url)
+        except Exception as update_error:
+            # Clean up stored file if profile update fails
             try:
-                supabase.storage.from_('profile-pictures').remove([unique_filename])
-            except:
+                os.remove(file_path)
+            except OSError:
                 pass
+            logger.error(f"Failed to update profile with new avatar: {update_error}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to update profile with new avatar"
             )
-        
+
         logger.info(f"Successfully uploaded avatar for user {user.id}")
-        
+
         return AvatarUploadResponse(
             avatar_url=public_url,
             message="Avatar uploaded successfully"
@@ -411,32 +406,22 @@ async def delete_avatar(
     """Delete user's current avatar"""
     try:
         logger.info(f"User {user.email} is deleting their avatar.")
-        
+
         # Get current profile to find avatar URL
-        profile_response = supabase.table('user_profiles').select('avatar_url').eq('user_id', user.id).execute()
-        
-        if not profile_response.data or not profile_response.data[0].get('avatar_url'):
+        profile_data = await profile_store.get_profile(user.id)
+
+        if not profile_data or not profile_data.get('avatar_url'):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No avatar found"
             )
-        
+
         # Delete files from storage
-        try:
-            existing_files = supabase.storage.from_('profile-pictures').list(user.id)
-            if existing_files:
-                files_to_delete = [f"{user.id}/{file['name']}" for file in existing_files if file['name'].startswith('avatar_')]
-                if files_to_delete:
-                    supabase.storage.from_('profile-pictures').remove(files_to_delete)
-                    logger.info(f"Deleted avatar files: {files_to_delete}")
-        except Exception as delete_error:
-            logger.warning(f"Could not delete avatar files: {delete_error}")
-        
+        _delete_avatar_files(user.id)
+
         # Update profile to remove avatar URL
-        supabase.table('user_profiles').update({
-            'avatar_url': None
-        }).eq('user_id', user.id).execute()
-        
+        await profile_store.set_avatar_url(user.id, user.email, None)
+
         logger.info(f"Successfully deleted avatar for user {user.id}")
         
         return {"message": "Avatar deleted successfully"}
