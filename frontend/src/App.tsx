@@ -5,7 +5,7 @@ import {
   Route,
   Navigate,
 } from "react-router-dom";
-import { AuthProvider } from "./contexts/AuthContext.new";
+import { AuthProvider, useAuth } from "./contexts/AuthContext.new";
 import { checkAndClearInvalidTokens } from "./utils/clearAuthTokens";
 import { AppProvider } from "./contexts/AppContext";
 import { ProtectedRoute } from "./components/ProtectedRoute.new";
@@ -28,6 +28,8 @@ import CleaningAssignments from "./components/CleaningAssignments";
 
 import { Toaster } from "react-hot-toast";
 import AppLoadingGate from "./components/AppLoadingGate";
+import { profileService } from "./services/profileService";
+import { applyTheme, applyLanguage, applyCompactView, applyAutoRefresh } from "./lib/uiPreferences";
 import { ToastProvider } from "./contexts/ToastContext";
 import GlobalToast from "./components/GlobalToast";
 import { QueryClient } from "@tanstack/react-query";
@@ -154,6 +156,34 @@ function AppContent() {
   useEffect(() => {
     localStorage.setItem("sidebarCollapsed", isCollapsed.toString());
   }, [isCollapsed]);
+
+  // Hydrate saved profile settings (theme, language, view preferences) once
+  // the user is authenticated. Logout clears the localStorage mirrors, so
+  // without this the saved theme/language only come back after visiting the
+  // profile page.
+  const { isAuthenticated } = useAuth();
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+
+    profileService
+      .getProfile()
+      .then((data) => {
+        if (cancelled) return;
+        applyTheme(data.profile.theme);
+        applyLanguage(data.profile.language);
+        applyCompactView(data.preferences.compact_view);
+        applyAutoRefresh(data.preferences.auto_refresh);
+        setIsCollapsed(data.preferences.sidebar_collapsed);
+      })
+      .catch((err) => {
+        console.warn("[App] Failed to hydrate profile settings:", err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated]);
 
   return (
     <SidebarContext.Provider
