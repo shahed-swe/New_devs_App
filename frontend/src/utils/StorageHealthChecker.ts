@@ -171,7 +171,7 @@ export class StorageHealthChecker {
         
         // Try to parse as JSON
         const parsed = JSON.parse(value);
-        
+
         // Check if it's our storage format
         if (typeof parsed === 'object' && parsed !== null) {
           // Validate basic structure
@@ -179,20 +179,22 @@ export class StorageHealthChecker {
             // This might be a legacy or foreign storage item
             continue;
           }
-          
+
           // Check timestamp validity
           if (typeof parsed.timestamp !== 'number' || parsed.timestamp > Date.now()) {
             corruptedKeys.push(key);
           }
-          
+
           // Check version if present
           if (parsed.version && typeof parsed.version !== 'string') {
             corruptedKeys.push(key);
           }
         }
       } catch (error) {
-        // Failed to parse JSON - corrupted
-        corruptedKeys.push(key);
+        // Not JSON — a plain-string value owned by other code (auth token,
+        // version markers, UI preferences). Foreign keys are never "ours"
+        // to delete, so leave them alone.
+        continue;
       }
     }
     

@@ -170,11 +170,13 @@ class LocalAuthClient {
     return { data: { session: null } };
   }
 
-  async getUser(token?: string): Promise<{ user: AuthUser | null }> {
+  // Returns the supabase-js response shape ({ data: { user }, error }) that
+  // consumers like sessionManager and sessionRecovery destructure.
+  async getUser(token?: string): Promise<{ data: { user: AuthUser | null }; error: Error | null }> {
     const tokenToUse = token || this.session?.access_token;
 
     if (!tokenToUse) {
-      return { user: null };
+      return { data: { user: null }, error: new Error('No active session') };
     }
 
     try {
@@ -186,14 +188,24 @@ class LocalAuthClient {
 
       if (response.ok) {
         const userData = await response.json();
-        return { user: userData };
+        return { data: { user: userData }, error: null };
       } else {
-        return { user: null };
+        return { data: { user: null }, error: new Error(`HTTP ${response.status}`) };
       }
     } catch (error) {
       console.error('[LocalAuth] Get user failed:', error);
-      return { user: null };
+      return { data: { user: null }, error: error as Error };
     }
+  }
+
+  // Supabase-js compatibility: there is no refresh endpoint in this backend,
+  // so "refreshing" just returns the current stored session. Without this,
+  // sessionManager's recovery path throws and wipes the auth state.
+  async refreshSession(): Promise<{ data: { session: AuthSession | null }; error: Error | null }> {
+    if (this.session?.access_token) {
+      return { data: { session: this.session }, error: null };
+    }
+    return { data: { session: null }, error: new Error('Auth session missing') };
   }
 
   async setSession(session: AuthSession): Promise<{ error: Error | null }> {
@@ -236,6 +248,7 @@ class LocalAuthClient {
       signInWithPassword: this.signInWithPassword.bind(this),
       signOut: this.signOut.bind(this),
       getSession: this.getSession.bind(this),
+      refreshSession: this.refreshSession.bind(this),
       getUser: this.getUser.bind(this),
       setSession: this.setSession.bind(this),
       onAuthStateChange: this.onAuthStateChange.bind(this),
