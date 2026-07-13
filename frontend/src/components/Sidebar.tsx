@@ -8,6 +8,7 @@ import {
   User,
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../contexts/AuthContext.new";
 import { useSidebar } from "../App";
 
@@ -62,6 +63,7 @@ const Sidebar: React.FC = () => {
   const navigate = useNavigate();
   const { signOut, user } = useAuth();
   const { isCollapsed, setIsCollapsed, isMobileOpen, setIsMobileOpen } = useSidebar();
+  const { t } = useTranslation();
 
   const filteredNavigation = React.useMemo(() => getFilteredNavigation(user), [user]);
 
@@ -142,6 +144,7 @@ const Sidebar: React.FC = () => {
           {filteredNavigation.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
+            const label = t(`nav.${item.section}`, item.name);
 
             return (
               <button
@@ -156,11 +159,11 @@ const Sidebar: React.FC = () => {
                   }
                   ${isCollapsed ? "justify-center" : ""}
                 `}
-                title={isCollapsed ? item.name : undefined}
+                title={isCollapsed ? label : undefined}
               >
                 <Icon className={`w-5 h-5 min-w-[20px] min-h-[20px] shrink-0 ${active ? "text-blue-700" : "text-gray-500"}`} />
                 {!isCollapsed && (
-                  <span className="font-medium">{item.name}</span>
+                  <span className="font-medium">{label}</span>
                 )}
               </button>
             );
@@ -176,7 +179,7 @@ const Sidebar: React.FC = () => {
               text-gray-700 hover:bg-gray-100 transition-colors mb-2
               ${isCollapsed ? "justify-center" : ""}
             `}
-            title={isCollapsed ? "Profile" : undefined}
+            title={isCollapsed ? t('nav.profile', 'Profile') : undefined}
           >
             <div className="w-8 h-8 min-w-[32px] min-h-[32px] bg-blue-100 rounded-full flex items-center justify-center shrink-0">
               <User className="w-4 h-4 min-w-[16px] min-h-[16px] shrink-0 text-blue-600" />
@@ -198,10 +201,10 @@ const Sidebar: React.FC = () => {
               text-red-600 hover:bg-red-50 transition-colors
               ${isCollapsed ? "justify-center" : ""}
             `}
-            title={isCollapsed ? "Logout" : undefined}
+            title={isCollapsed ? t('nav.logout', 'Logout') : undefined}
           >
             <LogOut className="w-5 h-5 min-w-[20px] min-h-[20px] shrink-0" />
-            {!isCollapsed && <span className="font-medium">Logout</span>}
+            {!isCollapsed && <span className="font-medium">{t('nav.logout', 'Logout')}</span>}
           </button>
         </div>
       </div>

@@ -158,5 +158,13 @@
         "noPaymentNow": "No se requiere pago ahora"
       }
     }
+  },
+  "nav": {
+    "dashboard": "Panel de control",
+    "properties": "Propiedades",
+    "reservations": "Reservas",
+    "cleaning": "Limpieza",
+    "profile": "Perfil",
+    "logout": "Cerrar sesión"
   }
 }

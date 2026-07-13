@@ -158,5 +158,13 @@
         "noPaymentNow": "لا يتطلب دفع الآن"
       }
     }
+  },
+  "nav": {
+    "dashboard": "لوحة التحكم",
+    "properties": "العقارات",
+    "reservations": "الحجوزات",
+    "cleaning": "التنظيف",
+    "profile": "الملف الشخصي",
+    "logout": "تسجيل الخروج"
   }
 }

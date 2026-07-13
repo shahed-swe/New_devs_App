@@ -158,5 +158,13 @@
         "noPaymentNow": "No payment required now"
       }
     }
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "properties": "Properties",
+    "reservations": "Reservations",
+    "cleaning": "Cleaning",
+    "profile": "Profile",
+    "logout": "Logout"
   }
 }

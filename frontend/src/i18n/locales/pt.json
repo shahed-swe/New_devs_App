@@ -158,5 +158,13 @@
         "noPaymentNow": "Nenhum pagamento necessário agora"
       }
     }
+  },
+  "nav": {
+    "dashboard": "Painel",
+    "properties": "Propriedades",
+    "reservations": "Reservas",
+    "cleaning": "Limpeza",
+    "profile": "Perfil",
+    "logout": "Sair"
   }
 }
