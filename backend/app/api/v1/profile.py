@@ -14,7 +14,6 @@ from ...models.profile import (
     NotificationPreference, NotificationPreferenceUpdate, AvatarUploadResponse,
     ProfileResponse
 )
-from ...database import supabase
 from ...services import profile_store
 from ...config import settings
 
@@ -40,7 +39,7 @@ def resize_image(image_data: bytes, size: tuple = AVATAR_SIZE) -> bytes:
     """Resize image to specified dimensions while maintaining aspect ratio"""
     try:
         image = Image.open(io.BytesIO(image_data))
-        
+
         # Convert to RGB if necessary (for PNG with transparency)
         if image.mode in ('RGBA', 'LA', 'P'):
             background = Image.new('RGB', image.size, (255, 255, 255))
@@ -48,21 +47,56 @@ def resize_image(image_data: bytes, size: tuple = AVATAR_SIZE) -> bytes:
                 image = image.convert('RGBA')
             background.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
             image = background
-        
+
         # Resize while maintaining aspect ratio
         image.thumbnail(size, Image.Resampling.LANCZOS)
-        
+
         # Save to bytes
         output = io.BytesIO()
         image.save(output, format='JPEG', quality=85, optimize=True)
         return output.getvalue()
-    
+
     except Exception as e:
         logger.error(f"Error resizing image: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid image file"
         )
+
+def _default_profile(user: AuthenticatedUser) -> Dict[str, Any]:
+    now_iso = datetime.utcnow().isoformat()
+    return {
+        'id': f'profile-{user.id}',
+        'user_id': user.id,
+        'display_name': (user.email.split('@')[0] if user.email else 'User'),
+        'bio': None,
+        'phone': None,
+        'department': None,
+        'job_title': None,
+        'location': None,
+        'timezone': 'UTC',
+        'language': 'en',
+        'theme': 'light',
+        'avatar_url': None,
+        'created_at': now_iso,
+        'updated_at': now_iso,
+    }
+
+def _default_preferences(user: AuthenticatedUser) -> Dict[str, Any]:
+    now_iso = datetime.utcnow().isoformat()
+    return {
+        'id': f'prefs-{user.id}',
+        'user_id': user.id,
+        'notification_email': True,
+        'notification_push': True,
+        'notification_desktop': True,
+        'notification_sound': True,
+        'auto_refresh': True,
+        'compact_view': False,
+        'sidebar_collapsed': False,
+        'created_at': now_iso,
+        'updated_at': now_iso,
+    }
 
 def _delete_avatar_files(user_id: str) -> None:
     """Remove any stored avatar files for this user."""
@@ -83,105 +117,41 @@ async def get_profile(
     """Get current user's profile, preferences, and notification settings"""
     try:
         logger.info(f"User {user.email} is fetching their profile.")
-        
-        # Create default profile data in case tables don't exist or profile is missing
-        now_iso = datetime.utcnow().isoformat()
-        # Build safe defaults matching the response models when DB rows are missing
-        default_profile = {
-            'id': f'synthetic-{user.id}',
-            'user_id': user.id,
-            'display_name': (user.email.split('@')[0] if user.email else 'User'),
-            'bio': None,
-            'phone': None,
-            'department': None,
-            'job_title': None,
-            'location': None,
-            'timezone': 'UTC',
-            'language': 'en',
-            'theme': 'light',
-            'avatar_url': None,
-            'created_at': now_iso,
-            'updated_at': now_iso,
-        }
-        
-        default_preferences = {
-            'id': f'synthetic-{user.id}',
-            'user_id': user.id,
-            'notification_email': True,
-            'notification_push': True,
-            'notification_desktop': True,
-            'notification_sound': True,
-            'auto_refresh': True,
-            'compact_view': False,
-            'sidebar_collapsed': False,
-            'created_at': now_iso,
-            'updated_at': now_iso,
-        }
-        
-        profile = None
-        preferences = None
-        notification_preferences = []
-        unread_count = 0
-        
-        # Try to get user profile
+
+        # Fall back to safe defaults when rows are missing
         try:
-            profile_response = supabase.table('user_profiles').select('*').eq('user_id', user.id).execute()
-            if profile_response.data:
-                profile_data = profile_response.data[0]
-                profile = UserProfile(**profile_data)
-            else:
-                logger.info(f"No profile found for user {user.id}, using default profile")
-                profile = UserProfile(**default_profile)
+            profile_data = await profile_store.get_profile(user.id)
         except Exception as profile_error:
-            logger.warning(f"Error accessing user_profiles table for user {user.id}: {profile_error}")
-            logger.info(f"Using default profile for user {user.id}")
-            profile = UserProfile(**default_profile)
-        
-        # Try to get user preferences
+            logger.warning(f"Error reading user_profiles for user {user.id}: {profile_error}")
+            profile_data = None
+        profile = UserProfile(**(profile_data or _default_profile(user)))
+
         try:
-            preferences_response = supabase.table('user_preferences').select('*').eq('user_id', user.id).execute()
-            if preferences_response.data:
-                preferences_data = preferences_response.data[0]
-                preferences = UserPreferences(**preferences_data)
-            else:
-                logger.info(f"No preferences found for user {user.id}, using default preferences")
-                preferences = UserPreferences(**default_preferences)
+            preferences_data = await profile_store.get_preferences(user.id)
         except Exception as preferences_error:
-            logger.warning(f"Error accessing user_preferences table for user {user.id}: {preferences_error}")
-            logger.info(f"Using default preferences for user {user.id}")
-            preferences = UserPreferences(**default_preferences)
-        
-        # Try to get notification preferences
+            logger.warning(f"Error reading user_preferences for user {user.id}: {preferences_error}")
+            preferences_data = None
+        preferences = UserPreferences(**(preferences_data or _default_preferences(user)))
+
         try:
-            notification_prefs_response = supabase.table('notification_preferences').select('*').eq('user_id', user.id).execute()
-            notification_preferences = [NotificationPreference(**pref) for pref in notification_prefs_response.data]
+            notification_rows = await profile_store.get_notification_preferences(user.id)
+            notification_preferences = [NotificationPreference(**row) for row in notification_rows]
         except Exception as notif_error:
-            logger.warning(f"Error accessing notification_preferences table for user {user.id}: {notif_error}")
-            logger.info(f"Using empty notification preferences for user {user.id}")
+            logger.warning(f"Error reading notification_preferences for user {user.id}: {notif_error}")
             notification_preferences = []
-        
-        # Try to get unread notification count
-        try:
-            unread_response = supabase.rpc('get_unread_notification_count', {'user_uuid': user.id}).execute()
-            data = unread_response.data
-            if isinstance(data, list):
-                # Handle mock/list response
-                unread_count = len(data) if data else 0
-            else:
-                unread_count = data if data is not None else 0
-        except Exception as unread_error:
-            logger.warning(f"Error getting unread notification count for user {user.id}: {unread_error}")
-            unread_count = 0
-        
-        logger.info(f"Successfully fetched/created profile for user {user.id}")
-        
+
+        # Unread notifications are not tracked in this environment
+        unread_count = 0
+
+        logger.info(f"Successfully fetched profile for user {user.id}")
+
         return ProfileResponse(
             profile=profile,
             preferences=preferences,
             notification_preferences=notification_preferences,
             unread_count=unread_count
         )
-        
+
     except Exception as e:
         logger.error(f"Error fetching profile for user {user.id}: {e}", exc_info=True)
         raise HTTPException(
@@ -197,33 +167,25 @@ async def update_profile(
     """Update current user's profile information"""
     try:
         logger.info(f"User {user.email} is updating their profile.")
-        
+
         # Prepare update data (only include non-None values)
         update_data = {}
         for field, value in profile_update.dict(exclude_unset=True).items():
             if value is not None:
                 update_data[field] = value
-        
+
         if not update_data:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No valid fields to update"
             )
-        
-        # Update profile
-        response = supabase.table('user_profiles').update(update_data).eq('user_id', user.id).execute()
-        
-        if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Profile not found"
-            )
-        
-        updated_profile = UserProfile(**response.data[0])
+
+        updated_row = await profile_store.update_profile(user.id, user.email, update_data)
+        updated_profile = UserProfile(**updated_row)
         logger.info(f"Successfully updated profile for user {user.id}")
-        
+
         return updated_profile
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -241,30 +203,22 @@ async def update_preferences(
     """Update current user's UI and general preferences"""
     try:
         logger.info(f"User {user.email} is updating their preferences.")
-        
+
         # Prepare update data
         update_data = preferences_update.dict(exclude_unset=True)
-        
+
         if not update_data:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No valid fields to update"
             )
-        
-        # Update preferences
-        response = supabase.table('user_preferences').update(update_data).eq('user_id', user.id).execute()
-        
-        if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Preferences not found"
-            )
-        
-        updated_preferences = UserPreferences(**response.data[0])
+
+        updated_row = await profile_store.update_preferences(user.id, update_data)
+        updated_preferences = UserPreferences(**updated_row)
         logger.info(f"Successfully updated preferences for user {user.id}")
-        
+
         return updated_preferences
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -283,39 +237,22 @@ async def update_notification_preference(
     """Update notification preferences for a specific category"""
     try:
         logger.info(f"User {user.email} is updating notification preferences for category {category}.")
-        
+
         # Prepare update data
         update_data = preference_update.dict(exclude_unset=True)
-        
+
         if not update_data:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No valid fields to update"
             )
-        
-        # Update or create notification preference
-        response = supabase.table('notification_preferences').update(update_data).eq('user_id', user.id).eq('category', category).execute()
-        
-        if not response.data:
-            # Create if doesn't exist
-            create_data = {
-                'user_id': user.id,
-                'category': category,
-                **update_data
-            }
-            response = supabase.table('notification_preferences').insert(create_data).execute()
-        
-        if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update notification preferences"
-            )
-        
-        updated_preference = NotificationPreference(**response.data[0])
+
+        updated_row = await profile_store.update_notification_preference(user.id, category, update_data)
+        updated_preference = NotificationPreference(**updated_row)
         logger.info(f"Successfully updated notification preferences for user {user.id}, category {category}")
-        
+
         return updated_preference
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -333,20 +270,20 @@ async def upload_avatar(
     """Upload and set user avatar image"""
     try:
         logger.info(f"User {user.email} is uploading an avatar.")
-        
+
         # Validate file
         if not file.filename:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No file selected"
             )
-        
+
         if not allowed_file(file.filename):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
             )
-        
+
         # Read and validate file size
         file_content = await file.read()
         if len(file_content) > MAX_FILE_SIZE:
@@ -354,7 +291,7 @@ async def upload_avatar(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB"
             )
-        
+
         # Resize image
         resized_image = resize_image(file_content)
 
@@ -389,7 +326,7 @@ async def upload_avatar(
             avatar_url=public_url,
             message="Avatar uploaded successfully"
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -423,9 +360,9 @@ async def delete_avatar(
         await profile_store.set_avatar_url(user.id, user.email, None)
 
         logger.info(f"Successfully deleted avatar for user {user.id}")
-        
+
         return {"message": "Avatar deleted successfully"}
-        
+
     except HTTPException:
         raise
     except Exception as e:
