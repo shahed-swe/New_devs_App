@@ -8,6 +8,7 @@ import { toast } from 'react-hot-toast';
 import { profileService } from '../../services/profileService';
 import { ProfileResponse, ProfileUpdateRequest, PreferencesUpdateRequest } from '../../types/profile';
 import AvatarUpload from './AvatarUpload';
+import { applyTheme } from '../../lib/uiPreferences';
 
 const ProfilePage: React.FC = () => {
   const [profileData, setProfileData] = useState<ProfileResponse | null>(null);
@@ -70,7 +71,10 @@ const ProfilePage: React.FC = () => {
         compact_view: data.preferences.compact_view,
         sidebar_collapsed: data.preferences.sidebar_collapsed
       });
-      
+
+      // Sync the running app with the saved theme
+      applyTheme(data.profile.theme);
+
     } catch (error) {
       console.error('Error loading profile:', error);
       setError('Failed to load profile data');
@@ -102,6 +106,10 @@ const ProfilePage: React.FC = () => {
 
       const updatedProfile = await profileService.updateProfile(changes);
       setProfileData(prev => prev ? { ...prev, profile: updatedProfile } : null);
+
+      // Apply the theme to the live UI
+      applyTheme(updatedProfile.theme);
+
       toast.success('Profile updated successfully!');
     } catch (error) {
       console.error('Error updating profile:', error);
