@@ -8,9 +8,11 @@ import { toast } from 'react-hot-toast';
 import { profileService } from '../../services/profileService';
 import { ProfileResponse, ProfileUpdateRequest, PreferencesUpdateRequest } from '../../types/profile';
 import AvatarUpload from './AvatarUpload';
-import { applyTheme, applyLanguage } from '../../lib/uiPreferences';
+import { applyTheme, applyLanguage, applyCompactView, applyAutoRefresh } from '../../lib/uiPreferences';
+import { useSidebar } from '../../App';
 
 const ProfilePage: React.FC = () => {
+  const { setIsCollapsed } = useSidebar();
   const [profileData, setProfileData] = useState<ProfileResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -72,9 +74,11 @@ const ProfilePage: React.FC = () => {
         sidebar_collapsed: data.preferences.sidebar_collapsed
       });
 
-      // Sync the running app with the saved theme and language
+      // Sync the running app with the saved settings
       applyTheme(data.profile.theme);
       applyLanguage(data.profile.language);
+      applyCompactView(data.preferences.compact_view);
+      applyAutoRefresh(data.preferences.auto_refresh);
 
     } catch (error) {
       console.error('Error loading profile:', error);
@@ -144,6 +148,12 @@ const ProfilePage: React.FC = () => {
 
       const updatedPreferences = await profileService.updatePreferences(changes);
       setProfileData(prev => prev ? { ...prev, preferences: updatedPreferences } : null);
+
+      // Apply preferences to the live UI
+      applyCompactView(updatedPreferences.compact_view);
+      applyAutoRefresh(updatedPreferences.auto_refresh);
+      setIsCollapsed(updatedPreferences.sidebar_collapsed);
+
       toast.success('Preferences updated successfully!');
     } catch (error) {
       console.error('Error updating preferences:', error);

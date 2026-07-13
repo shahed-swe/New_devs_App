@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { SecureAPI } from '../lib/secureApi';
+import { isAutoRefreshEnabled } from '../lib/uiPreferences';
 
 interface RevenueData {
     property_id: string;
@@ -20,28 +21,46 @@ export const RevenueSummary: React.FC<RevenueSummaryProps> = ({ propertyId = 'pr
     const [error, setError] = useState('');
 
     const activeTenant = debugTenant || 'candidate';
+    const [autoRefresh, setAutoRefresh] = useState(isAutoRefreshEnabled);
+
+    const fetchRevenue = useCallback(async (showLoading = true) => {
+        if (showLoading) setLoading(true);
+        try {
+            // Use SecureAPI to handle authentication automatically
+            // We pass the simulatedTenant option which SecureAPI will attach as a header
+            const response = await SecureAPI.getDashboardSummary(propertyId, {
+                simulatedTenant: activeTenant,
+                timestamp: Date.now()
+            });
+            setData(response);
+            setError('');
+        } catch (err) {
+            setError('Failed to load revenue data');
+            console.error(err);
+        } finally {
+            if (showLoading) setLoading(false);
+        }
+    }, [propertyId, activeTenant]);
 
     useEffect(() => {
-        const fetchRevenue = async () => {
-            setLoading(true);
-            try {
-                // Use SecureAPI to handle authentication automatically
-                // We pass the simulatedTenant option which SecureAPI will attach as a header
-                const response = await SecureAPI.getDashboardSummary(propertyId, {
-                    simulatedTenant: activeTenant,
-                    timestamp: Date.now()
-                });
-                setData(response);
-            } catch (err) {
-                setError('Failed to load revenue data');
-                console.error(err);
-            } finally {
-                setLoading(false);
-            }
-        };
-
         fetchRevenue();
-    }, [propertyId, activeTenant]);
+    }, [fetchRevenue]);
+
+    // Track the Auto Refresh preference while mounted
+    useEffect(() => {
+        const onChange = (event: Event) => {
+            setAutoRefresh((event as CustomEvent<boolean>).detail);
+        };
+        window.addEventListener('auto-refresh-changed', onChange);
+        return () => window.removeEventListener('auto-refresh-changed', onChange);
+    }, []);
+
+    // Silently refetch on an interval when Auto Refresh is enabled
+    useEffect(() => {
+        if (!autoRefresh) return;
+        const timer = window.setInterval(() => fetchRevenue(false), 30000);
+        return () => window.clearInterval(timer);
+    }, [autoRefresh, fetchRevenue]);
 
     if (loading) {
         return (

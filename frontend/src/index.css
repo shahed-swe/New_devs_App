@@ -419,6 +419,15 @@ body {
 }
 
 /* ==========================================================
+   Compact view (html.compact) — set by the Compact View
+   preference. Shrinks the root font size so all rem-based
+   Tailwind spacing tightens app-wide.
+   ========================================================== */
+html.compact {
+  font-size: 14px;
+}
+
+/* ==========================================================
    Dark theme (html.dark) — set by the Theme profile setting.
    Overrides the common Tailwind utility surfaces used across
    the app so existing components render a coherent dark UI.
